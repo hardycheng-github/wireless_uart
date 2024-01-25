@@ -14,7 +14,7 @@ formatter = logging.Formatter('[%(asctime)s] %(levelname)-7s| %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-app_version = '0.2'
+app_version = '0.3'
 server_host = '127.0.0.1'
 server_port = 58266
 socket_buffer_size = 4096
@@ -109,12 +109,19 @@ class Packet:
 
 class WirelessUartConnectHelper(socket.socket):
     def __init__(self, host, port):
+        global uart_local_path, uart_local_baud, uart_remote_path, uart_remote_baud, socket_buffer_size, recv_timeout_sec
         super().__init__(socket.AF_INET, socket.SOCK_STREAM)
         self.host = host
         self.port = port
         self.is_running = False
         self.recv_buffer = bytearray()
+        self.buf_size = socket_buffer_size
+        self.recv_timeout = recv_timeout_sec
         self.uart_dev = None
+        self.uart_path = uart_local_path
+        self.uart_baud = uart_local_baud
+        self.remote_path = uart_remote_path
+        self.remote_baud = uart_remote_baud
     
     def start_forever(self):
         while True:
@@ -137,17 +144,16 @@ class WirelessUartConnectHelper(socket.socket):
         self.send_packet('error', str(msg))
 
     def uart_open(self):
-        global uart_local_path, uart_local_baud
         try:
             if isinstance(self.uart_dev, serial.Serial):
-                if self.uart_dev.portstr == uart_local_path and self.uart_dev.baudrate == uart_local_baud:
-                    logger.debug('device(%s, %d) already opened.' % (uart_local_path, uart_local_baud))
+                if self.uart_dev.portstr == self.uart_path and self.uart_dev.baudrate == self.uart_baud:
+                    logger.debug('device(%s, %d) already opened.' % (self.uart_path, self.uart_baud))
                     return True
                 logger.warn("last device(%s) still using, try to close." % self.uart_dev.portstr)
                 self.uart_close()
-            self.uart_dev = serial.Serial(uart_local_path, uart_local_baud)
+            self.uart_dev = serial.Serial(self.uart_path, self.uart_baud)
             if self.uart_dev != None and self.uart_dev.is_open:
-                logger.info('+++ uart(%s,%d) open ok +++' % (uart_local_path, uart_local_baud))
+                logger.info('+++ uart(%s,%d) open ok +++' % (self.uart_path, self.uart_baud))
                 return True
         except Exception as ex1:
             logger.error('uart open fail: ' + str(ex1))
@@ -202,15 +208,14 @@ class WirelessUartConnectHelper(socket.socket):
             logger.error('send packet err: ' + str(ex1))
 
     def handle(self):
-        global socket_buffer_size, recv_timeout_sec, uart_remote_path, uart_remote_baud
-        self.send_packet('path', uart_remote_path)
-        self.send_packet('baud', uart_remote_baud)
+        self.send_packet('path', self.remote_path)
+        self.send_packet('baud', self.remote_baud)
         self.send_packet('start')
         try:
             while self:
-                ready = select.select([self], [], [], recv_timeout_sec)
+                ready = select.select([self], [], [], self.recv_timeout)
                 if ready[0]:
-                    self.recv_buffer += self.recv(socket_buffer_size).strip()
+                    self.recv_buffer += self.recv(self.buf_size).strip()
                     new_packet = Packet.parse(self.recv_buffer)
                     if new_packet is not None:
                         self.handle_packet(new_packet)
