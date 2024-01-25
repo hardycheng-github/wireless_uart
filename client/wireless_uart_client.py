@@ -14,7 +14,7 @@ formatter = logging.Formatter('[%(asctime)s] %(levelname)-7s| %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-app_version = '0.1'
+app_version = '0.2'
 server_host = '127.0.0.1'
 server_port = 58266
 socket_buffer_size = 4096
@@ -48,7 +48,10 @@ class Packet:
        self.set_key_value(key_str, val_bytes)
     
     def __str__(self):
-        return "0x"+self.get_bytes().hex()
+        if self.val_bytes == None or len(self.val_bytes) == 0:
+            return "key=%s,val=None" % (self.key_str)
+        else:
+            return "key=%s,val=0x%s" % (self.key_str, self.val_bytes.hex())
     
     def set_key_value(self, key_str:str, val_bytes:bytearray):
         self.key_str = key_str
@@ -86,14 +89,13 @@ class Packet:
                         logger.debug("Packet Found!")
                         split_idx = data_bytes.find(b'=')
                         if split_idx > 0:
-                            key_str = str(data_bytes[:split_idx])
+                            key_str = data_bytes[:split_idx].decode()
                             val_bytes = data_bytes[split_idx+1:]
-                            logger.debug("key=%s,val=0x%s" % (key_str, val_bytes.hex()))
                         else:
-                            key_str = str(data_bytes)
+                            key_str = data_bytes.decode()
                             val_bytes = bytearray()
-                            logger.debug("key=%s,val=None" % (key_str))
                         new_packet = Packet(key_str, val_bytes)
+                        logger.debug(str(new_packet))
                         return new_packet
                     raw_bytes = raw_bytes[2:]
                 elif start_idx > 0:
@@ -175,10 +177,10 @@ class WirelessUartConnectHelper(socket.socket):
             elif new_packet.data_size <= 0:
                 self.error('recv empty data.')
             else:
-                self.uart_dev.write(new_packet.data_bytes)
+                self.uart_dev.write(new_packet.val_bytes)
                 self.uart_dev.flush()
         elif new_packet.key_str == 'error':
-            logger.error('[!] server(%s, %d) recv err: %s' % (self.host, self.port, str(new_packet.data_bytes)))
+            logger.error('[!] server(%s, %d) recv err: %s' % (self.host, self.port, new_packet.data_bytes.decode()))
         else:
             self.error('unknown keyword: ' + new_packet.key_str)
 
@@ -192,7 +194,10 @@ class WirelessUartConnectHelper(socket.socket):
                 val_bytes = val.encode()
             else:
                 val_bytes = bytes(val)
-            self.sendall(Packet(key_str, val_bytes).get_bytes())
+            pack = Packet(key_str, val_bytes)
+            logger.debug("Packet Send!")
+            logger.debug(str(pack))
+            self.sendall(pack.get_bytes())
         except Exception as ex1:
             logger.error('send packet err: ' + str(ex1))
 
@@ -200,6 +205,7 @@ class WirelessUartConnectHelper(socket.socket):
         global socket_buffer_size, recv_timeout_sec, uart_remote_path, uart_remote_baud
         self.send_packet('path', uart_remote_path)
         self.send_packet('baud', uart_remote_baud)
+        self.send_packet('start')
         try:
             while self:
                 ready = select.select([self], [], [], recv_timeout_sec)
@@ -222,7 +228,7 @@ if __name__ == "__main__":
     logger.info("= Wireless UART Server ver.%s =" % app_version)
     logger.info("=============================%s" % ("=" * len(app_version)))
     try:
-        parser = argparse.ArgumentParser(description="TheNewDiag Egame Server ver.%s" % app_version)
+        parser = argparse.ArgumentParser(description="Wireless UART Server ver.%s" % app_version)
         parser.add_argument(
             "-i",
             "--host",
