@@ -14,7 +14,7 @@ formatter = logging.Formatter('[%(asctime)s] %(levelname)-7s| %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-app_version = '0.3'
+app_version = '0.4'
 server_host = '127.0.0.1'
 server_port = 58266
 socket_buffer_size = 4096
@@ -37,7 +37,8 @@ XOR Checksum - 1 byte
 """
 class Packet:
     SYMBOL_START = 0x2423
-    PACKET_MIN = (2+4+2+1) # start + length + min data + checksum
+    SYMBOL_START_BYTES = b'\x23\x24'
+    PACKET_MIN = (2+4+1+1) # start + length + min data + checksum
 
     def __init__(self, key_str:str, val_bytes:bytearray=bytearray()):
        self.key_str = ''
@@ -71,15 +72,30 @@ class Packet:
         raw_bytes += self.data_bytes
         raw_bytes += self.checksum.to_bytes(1, 'little')
         return raw_bytes
+    
+    @staticmethod
+    def bytes_add_escape(raw_bytes:bytearray):
+        new_raw = bytearray()
+        # @TODO
+        return new_raw
+
+    @staticmethod
+    def bytes_remove_escape(raw_bytes:bytearray):
+        new_raw = bytearray()
+        # @TODO
+        return new_raw
 
     @staticmethod
     def parse(raw_bytes:bytearray):
         try:
-            start_bytes = struct.pack('<1H', Packet.SYMBOL_START)
             while raw_bytes is not None and len(raw_bytes) >= Packet.PACKET_MIN:
-                start_idx = raw_bytes.find(start_bytes)
+                start_idx = raw_bytes.find(Packet.SYMBOL_START_BYTES)
                 if start_idx == 0:
+                    logger.debug("raw=0x" + raw_bytes.hex())
                     _, data_size = struct.unpack('<1H1I', raw_bytes[:6])
+                    if len(raw_bytes) < 2+4+1+data_size:
+                        logger.debug('packet size not enough.')
+                        return None
                     data_bytes = raw_bytes[6:6+data_size]
                     checksum = raw_bytes[6+data_size]
                     checktmp = 0
@@ -94,7 +110,7 @@ class Packet:
                         else:
                             key_str = data_bytes.decode()
                             val_bytes = bytearray()
-                        new_packet = Packet(key_str, val_bytes)
+                        new_packet = Packet(key_str, Packet.bytes_remove_escape(val_bytes))
                         logger.debug(str(new_packet))
                         return new_packet
                     raw_bytes = raw_bytes[2:]
@@ -176,7 +192,7 @@ class WirelessUartConnectHelper(socket.socket):
     
     def handle_packet(self, new_packet: Packet):
         if not isinstance(new_packet, Packet):
-            self.recv_buffer = bytearray()
+            return
         elif new_packet.key_str == 'data':
             if not self.is_running:
                 self.error('task not ready.')
@@ -186,24 +202,29 @@ class WirelessUartConnectHelper(socket.socket):
                 self.uart_dev.write(new_packet.val_bytes)
                 self.uart_dev.flush()
         elif new_packet.key_str == 'error':
-            logger.error('[!] server(%s, %d) recv err: %s' % (self.host, self.port, new_packet.data_bytes.decode()))
+            logger.error('[!] server(%s, %d) recv err: %s' % (self.host, self.port, new_packet.val_bytes.decode()))
         else:
             self.error('unknown keyword: ' + new_packet.key_str)
 
-    def send_packet(self, key_str:str, val = None):
+    def send_packet(self, key_str:str, val = bytearray()):
         try:
             if val is None:
-                val_bytes = bytearray()
+                self.send_packet(key_str)
             elif isinstance(val, int):
-                val_bytes = str(val).encode()
+                self.send_packet(key_str, str(val).encode())
             elif isinstance(val, str):
-                val_bytes = val.encode()
+                self.send_packet(key_str, val.encode())
             else:
                 val_bytes = bytes(val)
-            pack = Packet(key_str, val_bytes)
-            logger.debug("Packet Send!")
-            logger.debug(str(pack))
-            self.sendall(pack.get_bytes())
+                # # if end with \r, append \n
+                # if len(val_bytes) > 0 and val_bytes[-1] == 0x0d:
+                #     val_bytes += b'\n'
+                pack = Packet(key_str, val_bytes)
+                raw_bytes = Packet.bytes_add_escape(pack.get_bytes())
+                logger.debug("Packet Send!")
+                logger.debug(str(pack))
+                logger.debug("raw=0x" + raw_bytes.hex())
+                self.sendall(raw_bytes)
         except Exception as ex1:
             logger.error('send packet err: ' + str(ex1))
 
@@ -215,14 +236,25 @@ class WirelessUartConnectHelper(socket.socket):
             while self:
                 ready = select.select([self], [], [], self.recv_timeout)
                 if ready[0]:
-                    self.recv_buffer += self.recv(self.buf_size).strip()
-                    new_packet = Packet.parse(self.recv_buffer)
-                    if new_packet is not None:
-                        self.handle_packet(new_packet)
-                if self.uart_dev.in_waiting > 0:
+                    recv_raw = self.recv(self.buf_size).strip()
+                    if recv_raw is not None and len(recv_raw) > 0:
+                        self.recv_buffer += recv_raw
+                        while self.recv_buffer.find(Packet.SYMBOL_START_BYTES) >= 0:
+                            new_packet = Packet.parse(self.recv_buffer)
+                            if new_packet is not None:
+                                self.recv_buffer = self.recv_buffer[2+4+1+new_packet.data_size:]
+                                self.handle_packet(new_packet)
+                            else:
+                                break
+                        # make sure that start symbol not exists and last byte do not possentially being a start symbol
+                        if len(self.recv_buffer) > 0 and \
+                            self.recv_buffer.find(Packet.SYMBOL_START_BYTES) < 0 and \
+                            self.recv_buffer[-1] != (Packet.PACKET_MIN & 0xFF):
+                            self.recv_buffer = bytearray()
+                if isinstance(self.uart_dev, serial.Serial) and self.uart_dev.in_waiting > 0:
                     rx_bytes = self.uart_dev.read_all() # always read to avoid too many data hanged
                     if self.is_running and rx_bytes != None and len(rx_bytes) > 0:
-                        self.request.sendall(Packet('data', rx_bytes).get_bytes())
+                        self.send_packet('data', rx_bytes)
         except Exception as ex1:
             logger.error("server(%s, %d) err: %s" % (self.host, self.port, str(ex1)))
         logger.info('--- server(%s, %d) exit ---' % (self.host, self.port))
