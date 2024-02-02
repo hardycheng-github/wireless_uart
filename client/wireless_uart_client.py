@@ -14,12 +14,13 @@ formatter = logging.Formatter('[%(asctime)s] %(levelname)-7s| %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-app_version = '0.4'
+app_version = '0.5'
 server_host = '127.0.0.1'
 server_port = 58266
 socket_buffer_size = 4096
 recv_timeout_sec = 0.01
 debug_enable = False
+data_encode = False
 
 uart_local_path = '/dev/ttyUSB0'
 uart_local_baud = 115200
@@ -34,10 +35,13 @@ Data Bytes - bytearray - [Packet Length] bytes
  > Key String - string - dynamic bytes (1~kN) - until '=', if '=' not exist, whole bytes as key string, and value as empty
  > Value Bytes - bytearray - dynamic bytes (0~vN) - until end (allow empty)
 XOR Checksum - 1 byte
+End Symbol - uint16 - 0x24 0x23 (Optional)
 """
 class Packet:
     SYMBOL_START = 0x2423
+    SYMBOL_END = 0x2324
     SYMBOL_START_BYTES = b'\x23\x24'
+    SYMBOL_END_BYTES = b'\x24\x23'
     PACKET_MIN = (2+4+1+1) # start + length + min data + checksum
 
     def __init__(self, key_str:str, val_bytes:bytearray=bytearray()):
@@ -63,26 +67,123 @@ class Packet:
         else:
             self.data_bytes = key_str.encode()
             self.data_size = len(self.data_bytes)
-        self.checksum = 0
-        for b in self.data_bytes:
-            self.checksum = self.checksum ^ b & 0xFF
+        self.checksum = Packet.calc_checksum(self.data_bytes)
+    
+    def do_encode(self):
+        if self.val_bytes == None or len(self.val_bytes) == 0:
+            return
+        logger.debug("=== do_encode ===")
+        logger.debug("0x" + self.val_bytes.hex())
+        self.set_key_value(self.key_str, Packet.bytes_encode(self.val_bytes))
+        logger.debug("0x" + self.val_bytes.hex())
+        logger.debug("=================")
+    
+    def do_decode(self):
+        if self.val_bytes == None or len(self.val_bytes) == 0:
+            return
+        logger.debug("=== do_decode ===")
+        logger.debug("0x" + self.val_bytes.hex())
+        self.set_key_value(self.key_str, Packet.bytes_decode(self.val_bytes))
+        logger.debug("0x" + self.val_bytes.hex())
+        logger.debug("=================")
 
     def get_bytes(self):
         raw_bytes = struct.pack('<1H1I', self.SYMBOL_START, self.data_size)
         raw_bytes += self.data_bytes
         raw_bytes += self.checksum.to_bytes(1, 'little')
+        raw_bytes += Packet.SYMBOL_END_BYTES
         return raw_bytes
     
     @staticmethod
-    def bytes_add_escape(raw_bytes:bytearray):
+    def calc_checksum(raw: bytearray):
+        checksum = 0
+        for b in raw:
+            checksum = checksum ^ b & 0xFF
+        return checksum
+    
+    """
+    encode rules:
+    - words: from space(0x20) to '~'(0x7E)
+    - if not word: bytes to '\x00'-'\xFF', ex: \n(0x0d) -> '\x0d'
+    - if backslash: append twice, ex: backslash(0x5c) -> '\\'
+    """
+    @staticmethod
+    def is_word(char: int):
+        # start ' ', until '~', not include 0x7F(DEL)
+        return char in range(0x20, 0x7F) 
+    
+    @staticmethod
+    def bytes_encode(raw_bytes:bytearray):
         new_raw = bytearray()
-        # @TODO
+        for r in raw_bytes:
+            # r is not word
+            if not Packet.is_word(r):
+                new_raw += b"\\x%02x" % r
+            # r is '\'
+            elif r == 0x5c:
+                # append '\' twice
+                new_raw += b"\\\\"
+            else:
+                new_raw += r.to_bytes(1, 'little')
         return new_raw
 
     @staticmethod
-    def bytes_remove_escape(raw_bytes:bytearray):
+    def bytes_decode(raw_bytes:bytearray):
         new_raw = bytearray()
-        # @TODO
+        # states
+        # 0: normal
+        # 1: backslash appear
+        # 2: backslash + hex
+        # 3: hex num 1
+        state = 0
+        hex_1 = 0
+        for r in raw_bytes:
+            if state == 1:
+                # if '\' appear twice, is symbol '\'
+                if r == 0x5c:
+                    new_raw += r.to_bytes(1, 'little')
+                    state = 0
+                elif r == 0x58 or r == 0x78:
+                    # 0x58 -> X, 0x78 -> x
+                    state = 2
+                else:
+                    # unknown situation, write backslash and this byte into raw.
+                    logger.warn("decode fail: '\\' + '%02x'" % r)
+                    new_raw += b'\\'
+                    new_raw += r.to_bytes(1, 'little')
+                    state = 0
+            elif state == 2:
+                # r in 0-9, a-h, A-H
+                if r in range(0x30, 0x40) or r in range(0x61, 0x69) or r in range(0x41, 0x49):
+                    hex_1 = r
+                    state = 3
+                else:
+                    # unknown situation, write '\x' and this byte into raw.
+                    logger.warn("decode fail: '\\x' + '%02x'" % r)
+                    new_raw += b'\\x'
+                    new_raw += r.to_bytes(1, 'little')
+                    state = 0
+            elif state == 3:
+                # r in 0-9, a-h, A-H
+                if r in range(0x30, 0x40) or r in range(0x61, 0x69) or r in range(0x41, 0x49):
+                    hex_bytes = bytes.fromhex("%c%c" % (hex_1, r))[:1]
+                    logger.debug('decoded: \\x' + hex_bytes.hex())
+                    new_raw += hex_bytes
+                    state = 0
+                else:
+                    # unknown situation, write '\x' + hex_1 and this byte into raw.
+                    logger.warn("decode fail: '\\x' + '%02x' + '%02x'" % (hex_1, r))
+                    new_raw += b'\\x'
+                    new_raw += hex_1.to_bytes(1, 'little')
+                    new_raw += r.to_bytes(1, 'little')
+                    state = 0
+            else:
+                if r == 0x5c:
+                    # 0x5c -> '\'
+                    state = 1
+                else:
+                    new_raw += r.to_bytes(1, 'little')
+                    state = 0
         return new_raw
 
     @staticmethod
@@ -93,14 +194,12 @@ class Packet:
                 if start_idx == 0:
                     logger.debug("raw=0x" + raw_bytes.hex())
                     _, data_size = struct.unpack('<1H1I', raw_bytes[:6])
-                    if len(raw_bytes) < 2+4+1+data_size:
+                    if len(raw_bytes) < 6+1+data_size:
                         logger.debug('packet size not enough.')
                         return None
                     data_bytes = raw_bytes[6:6+data_size]
                     checksum = raw_bytes[6+data_size]
-                    checktmp = 0
-                    for b in data_bytes:
-                        checktmp = checktmp ^ b
+                    checktmp = Packet.calc_checksum(data_bytes)
                     if checktmp == checksum:
                         logger.debug("Packet Found!")
                         split_idx = data_bytes.find(b'=')
@@ -110,7 +209,7 @@ class Packet:
                         else:
                             key_str = data_bytes.decode()
                             val_bytes = bytearray()
-                        new_packet = Packet(key_str, Packet.bytes_remove_escape(val_bytes))
+                        new_packet = Packet(key_str, val_bytes)
                         logger.debug(str(new_packet))
                         return new_packet
                     raw_bytes = raw_bytes[2:]
@@ -125,7 +224,7 @@ class Packet:
 
 class WirelessUartConnectHelper(socket.socket):
     def __init__(self, host, port):
-        global uart_local_path, uart_local_baud, uart_remote_path, uart_remote_baud, socket_buffer_size, recv_timeout_sec
+        global uart_local_path, uart_local_baud, uart_remote_path, uart_remote_baud, socket_buffer_size, recv_timeout_sec, data_encode
         super().__init__(socket.AF_INET, socket.SOCK_STREAM)
         self.host = host
         self.port = port
@@ -138,6 +237,7 @@ class WirelessUartConnectHelper(socket.socket):
         self.uart_baud = uart_local_baud
         self.remote_path = uart_remote_path
         self.remote_baud = uart_remote_baud
+        self.data_encode = data_encode
     
     def start_forever(self):
         while True:
@@ -220,7 +320,9 @@ class WirelessUartConnectHelper(socket.socket):
                 # if len(val_bytes) > 0 and val_bytes[-1] == 0x0d:
                 #     val_bytes += b'\n'
                 pack = Packet(key_str, val_bytes)
-                raw_bytes = Packet.bytes_add_escape(pack.get_bytes())
+                if self.data_encode:
+                    pack.do_encode()
+                raw_bytes = pack.get_bytes()
                 logger.debug("Packet Send!")
                 logger.debug(str(pack))
                 logger.debug("raw=0x" + raw_bytes.hex())
@@ -242,6 +344,8 @@ class WirelessUartConnectHelper(socket.socket):
                         while self.recv_buffer.find(Packet.SYMBOL_START_BYTES) >= 0:
                             new_packet = Packet.parse(self.recv_buffer)
                             if new_packet is not None:
+                                if self.data_encode:
+                                    new_packet.do_decode()
                                 self.recv_buffer = self.recv_buffer[2+4+1+new_packet.data_size:]
                                 self.handle_packet(new_packet)
                             else:
@@ -309,6 +413,12 @@ if __name__ == "__main__":
             action='store_true',
             help='Set Debug Logger Enable (Default Disable)')
         parser.add_argument(
+            "-e",
+            "--encode",
+            default=data_encode,
+            action='store_true',
+            help='Set Data Encode Enable (Default Disable)')
+        parser.add_argument(
             "-b",
             "--buffer_size",
             default=socket_buffer_size,
@@ -332,6 +442,7 @@ if __name__ == "__main__":
         socket_buffer_size = args.buffer_size
         recv_timeout_sec = args.recv_timeout
         debug_enable = args.debug
+        data_encode = args.encode
         if debug_enable:
             logger.setLevel(logging.DEBUG)
             logger.warning('[!] Debug Mode Enable')
