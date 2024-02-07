@@ -1,0 +1,1 @@
+docker build --tag esp8266 .
