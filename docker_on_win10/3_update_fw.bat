@@ -39,5 +39,3 @@ if "%new_port%" neq "" (
 echo Start update firmware...
 
 call %file%
-
-pause
