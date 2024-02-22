@@ -1,3 +1,4 @@
 [submodule "esp8266/ESP8266_RTOS_SDK"]
 	path = esp8266/ESP8266_RTOS_SDK
 	url = https://github.com/hardycheng-github/esp8266_rtos_sdk.git
+	branch = master
