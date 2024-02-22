@@ -1,5 +1,4 @@
 FROM ubuntu:18.04
-MAINTAINER hardycheng@msi.com
 
 ENV ESP_ROOT=/esp
 RUN apt update
@@ -10,11 +9,15 @@ RUN cd $ESP_ROOT
 
 # setup sdk from git
 ENV ESP_GIT_ROOT=$ESP_ROOT/git
-ENV ESP_SDK_URL=https://github.com/hardycheng-github/esp8266_rtos_sdk.git
-ENV ESP_SDK_PATH=$ESP_GIT_ROOT/ESP8266_RTOS_SDK
+ENV ESP_WUART_URL=https://github.com/hardycheng-github/wireless_uart.git
+ENV ESP_WUART_PATH=$ESP_GIT_ROOT/wireless_uart
+ENV ESP_SDK_ROOT=$ESP_ROOT/sdk
+ENV ESP_SDK_PATH=$ESP_SDK_ROOT/ESP8266_RTOS_SDK
 RUN mkdir -p $ESP_GIT_ROOT
 RUN cd $ESP_GIT_ROOT
-RUN git clone $ESP_SDK_URL $ESP_SDK_PATH
+RUN git clone --recurse-submodules $ESP_WUART_URL $ESP_WUART_PATH
+RUN mkdir -p $ESP_SDK_ROOT
+RUN ln -s $ESP_WUART_PATH/esp8266/ESP8266_RTOS_SDK $ESP_SDK_PATH
 RUN cd $ESP_SDK_PATH
 WORKDIR $ESP_SDK_PATH
 RUN $ESP_SDK_PATH/install.sh
