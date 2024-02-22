@@ -4,9 +4,15 @@ DEV_PATH="/shares/develop";
 TARGET_PATH="/shares/fw_lastest";
 echo "TARGET_PATH=$TARGET_PATH";
 mkdir -p ${TARGET_PATH}/bootloader;
+
+# sync esp8266 sdk
+cd $ESP_WUART_PATH;
+echo "syncing esp8266 sdk...";
 git reset --hard;
 git pull;
+git submodule update;
 
+cd $CUR_PATH;
 ./install.sh;
 . ./export.sh;
 
