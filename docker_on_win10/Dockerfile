@@ -15,10 +15,11 @@ ENV ESP_SDK_ROOT=$ESP_ROOT/sdk
 ENV ESP_SDK_PATH=$ESP_SDK_ROOT/ESP8266_RTOS_SDK
 RUN mkdir -p $ESP_GIT_ROOT
 RUN cd $ESP_GIT_ROOT
-RUN git clone --recurse-submodules $ESP_WUART_URL $ESP_WUART_PATH
+RUN git clone $ESP_WUART_URL $ESP_WUART_PATH
 RUN mkdir -p $ESP_SDK_ROOT
 RUN ln -s $ESP_WUART_PATH/esp8266/ESP8266_RTOS_SDK $ESP_SDK_PATH
 RUN cd $ESP_SDK_PATH
 WORKDIR $ESP_SDK_PATH
+RUN git submodule update --init --recursive
 RUN $ESP_SDK_PATH/install.sh
 COPY sync_build.sh ./

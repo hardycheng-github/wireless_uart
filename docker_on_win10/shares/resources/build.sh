@@ -34,7 +34,11 @@ if [ -e $DEV_PATH ]; then
     find $DEV_PATH -type d -name build -prune -o -type f -print0 | while IFS= read -r -d '' file; do
         file="$(readlink -f $file)"
         target="develop/${file#"$DEV_PATH/"}"
-        target_md5="$(md5sum $target | awk '{print $1}' | uniq)"
+        if [ -e $target ]; then
+            target_md5="$(md5sum $target | awk '{print $1}' | uniq)"
+        else
+            target_md5=""
+        fi
         file_md5="$(md5sum $file | awk '{print $1}' | uniq)"
         target_path="$(dirname $target)"
         if [ "$target_md5" != "$file_md5" ]; then
@@ -52,8 +56,8 @@ cd develop/app/wireless_uart/;
 echo "cd %~dp0" > ${TARGET_PATH}/esptool.bat;
 make all | tail -n 1 | grep bootloader >> ${TARGET_PATH}/esptool.bat;
 sed -i \
--e 's!/esp/git/ESP8266_RTOS_SDK/develop/app/wireless_uart/build/!!g' \
--e 's!/esp/git/!../../../esp8266/!g' \
+-e 's!/esp/git/wireless_uart/esp8266/ESP8266_RTOS_SDK/develop/app/wireless_uart/build/!!g' \
+-e 's!/esp/git/wireless_uart/!../../../!g' \
 -e 's!--!^\n--!g' \
 ${TARGET_PATH}/esptool.bat;
 
@@ -65,7 +69,11 @@ if [ -e $DEV_PATH ]; then
     cd $CUR_PATH;
     find develop_bak -type d -name build -prune -o -type f -print0 | while IFS= read -r -d '' file; do
         target=${file//develop_bak\//develop\/}
-        target_md5="$(md5sum $target | awk '{print $1}' | uniq)"
+        if [ -e $target ]; then
+            target_md5="$(md5sum $target | awk '{print $1}' | uniq)"
+        else
+            target_md5=""
+        fi
         file_md5="$(md5sum $file | awk '{print $1}' | uniq)"
         target_path="$(dirname $target)"
         if [ "$target_md5" != "$file_md5" ]; then
