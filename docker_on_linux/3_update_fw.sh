@@ -1,5 +1,9 @@
 #!/bin/bash
 
+script_file=$(realpath "${BASH_SOURCE[0]}")
+script_dir=$(dirname "$script_file")
+cd $script_dir
+
 file="shares/fw_lastest/esptool.sh"
 tempfile="temp.sh"
 

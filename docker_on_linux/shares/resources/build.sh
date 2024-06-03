@@ -53,13 +53,14 @@ fi
 
 echo "start build...";
 cd develop/app/wireless_uart/;
-echo "cd %~dp0" > ${TARGET_PATH}/esptool.bat;
-make all | tail -n 1 | grep bootloader >> ${TARGET_PATH}/esptool.bat;
+echo "#!/bin/bash" > ${TARGET_PATH}/esptool.sh;
+echo "cd \"$(dirname $0)\"" > ${TARGET_PATH}/esptool.sh;
+make all | tail -n 1 | grep bootloader >> ${TARGET_PATH}/esptool.sh;
 sed -i \
 -e 's!/esp/git/wireless_uart/esp8266/ESP8266_RTOS_SDK/develop/app/wireless_uart/build/!!g' \
 -e 's!/esp/git/wireless_uart/!../../../!g' \
 -e 's!--!^\n--!g' \
-${TARGET_PATH}/esptool.bat;
+${TARGET_PATH}/esptool.sh;
 
 cp -r build/**.bin $TARGET_PATH/;
 cp -r build/bootloader/**.bin ${TARGET_PATH}/bootloader/;

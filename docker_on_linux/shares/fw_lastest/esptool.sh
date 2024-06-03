@@ -1,7 +1,5 @@
 #!/bin/bash
-
-# 切換到腳本所在的目錄
-cd "$(dirname "$0")"
+cd "$(dirname $0)"
 
 python3 ../../../esp8266/ESP8266_RTOS_SDK/components/esptool_py/esptool/esptool.py \
 --chip esp8266 \

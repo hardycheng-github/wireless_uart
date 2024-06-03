@@ -21,5 +21,6 @@ RUN ln -s $ESP_WUART_PATH/esp8266/ESP8266_RTOS_SDK $ESP_SDK_PATH
 RUN cd $ESP_SDK_PATH
 WORKDIR $ESP_SDK_PATH
 RUN git submodule update --init --recursive
-RUN $ESP_SDK_PATH/install.sh
+# RUN $ESP_SDK_PATH/install.sh
 COPY sync_build.sh ./
+RUN chmod 777 sync_build.sh
