@@ -11,6 +11,7 @@ echo "syncing esp8266 sdk...";
 git reset --hard;
 git pull;
 git submodule update;
+chmod 777 -R .
 
 cd $CUR_PATH;
 ./install.sh;
